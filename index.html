@@ -777,6 +777,94 @@ body.t-anime   { background: linear-gradient(160deg,#ffe0f0 0%,#ffc2e0 40%,#ffb3
   color: #fbbf24;
   line-height: 1.1;
 }
+
+/* ═══════════════════════════════════
+   MOBILE RESPONSIVE
+   ═══════════════════════════════════ */
+@media (max-width: 660px) {
+
+  /* ── Selection screen ── */
+  #sel {
+    padding: 40px 16px 32px;
+    justify-content: flex-start;
+    overflow-y: auto;
+  }
+  #sel p { margin-bottom: 28px; }
+  .theme-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .theme-card        { padding: 20px 12px; }
+  .theme-card .icon  { font-size: 2.4rem; margin-bottom: 8px; }
+  .theme-card h3     { font-size: 0.95rem; margin-bottom: 4px; }
+  .theme-card p      { font-size: 0.78rem; }
+
+  /* ── Game screen layout ── */
+  #game {
+    padding: 10px;
+    align-items: stretch;
+  }
+  .game-wrap {
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 0;
+  }
+  /* Reorder: controls + keyboard first, illustration below */
+  .game-panel  { order: 1; gap: 8px; }
+  .illus-panel { order: 2; width: 100%; border-radius: 16px; max-height: 156px; }
+
+  /* Crop SVG to show character area (shift up ~18% of container width) */
+  #illus { margin-top: -18%; overflow: visible; }
+
+  /* Hide guess-bar (wrong count shown via wrong letters) and hint text */
+  .guess-bar { display: none; }
+  .hint-text { display: none; }
+
+  /* Word display */
+  .word-wrap { padding: 12px 12px; }
+  .word-row  { gap: 6px; }
+  .slot      { min-width: clamp(20px, 6vw, 32px); }
+  .slot .letter {
+    font-size: clamp(0.88rem, 5vw, 1.4rem);
+    min-width: clamp(20px, 6vw, 32px);
+    height: clamp(26px, 7vw, 40px);
+  }
+
+  /* Wrong letters */
+  .wrong-wrap { padding: 8px 12px; min-height: 40px; }
+
+  /* ── Keyboard ── */
+  .key {
+    width: clamp(27px, 8.5vw, 40px);
+    height: clamp(40px, 10.5vw, 44px);
+    font-size: clamp(0.68rem, 2.3vw, 0.85rem);
+    border-radius: 7px;
+  }
+  .key-row { gap: clamp(2px, 0.7vw, 6px); }
+
+  /* ── Player bar ── */
+  .player-chip { font-size: 0.72rem; padding: 3px 10px; gap: 4px; }
+  .player-chip-dot { width: 5px; height: 5px; }
+
+  /* ── Modal ── */
+  .modal-box {
+    padding: 20px 16px;
+    border-radius: 20px;
+    width: 96%;
+  }
+  .modal-title  { font-size: 1.5rem; }
+  .score-display { font-size: 1.8rem; }
+  #m-illus      { width: 120px; }
+  .modal-btns   { gap: 8px; }
+  .modal-btn    { padding: 12px 20px; font-size: 0.95rem; }
+
+  /* ── Waiting room ── */
+  #waiting { padding-top: 32px; }
+  .room-code-value { font-size: clamp(2rem, 10vw, 3.8rem); letter-spacing: 6px; padding: 8px 20px; }
+  .qr-wrap  { padding: 12px; }
+  .player-list-box { max-width: 100%; }
+  .start-game-btn  { max-width: 100%; }
+}
 </style>
 </head>
 <body>
@@ -2098,8 +2186,9 @@ function handleRoomUpdate(room) {
     guessed = new Set(room.guessed || []);
     renderWord(); renderKeyboard();
     const iWon = room.winner_name === mpPlayerName;
-    if (iWon) { launchConfetti(); triggerWinAnim(); }
-    showMpModal(true, room.winner_name);
+    if (iWon) triggerWinAnim();
+    // Brief pause so players see the completed/final word before the modal
+    setTimeout(() => showMpModal(true, room.winner_name), 700);
   }
 
   if (room.status === 'lost' && !over) {
@@ -2124,15 +2213,19 @@ function hostPickTheme() {
 function showMpModal(won, winnerName) {
   const T = THEMES[theme];
   document.getElementById('m-word').textContent = word.toUpperCase();
-  document.getElementById('m-win-body').style.display    = 'none';
-  document.getElementById('m-lose-body').style.display   = 'none';
-  document.getElementById('m-illus').style.display       = 'none';
+  // Reset all sections
+  document.getElementById('m-win-body').style.display      = 'none';
+  document.getElementById('m-lose-body').style.display     = 'none';
+  document.getElementById('m-illus').style.display         = 'none';
   document.getElementById('m-winner-banner').style.display = 'none';
+  document.getElementById('m-emoji').style.display         = 'none';
 
-  if (won) {
-    const iWon = winnerName === mpPlayerName;
-    document.getElementById('m-emoji').style.display = 'none';
-    document.getElementById('m-title').textContent   = iWon ? 'You won!' : winnerName + ' won!';
+  const iWon = won && winnerName === mpPlayerName;
+  const theyWon = won && !iWon;
+
+  if (iWon) {
+    // ── YOU WON ──
+    document.getElementById('m-title').textContent = 'You won!';
     document.getElementById('m-winner-name').textContent = winnerName;
     document.getElementById('m-winner-banner').style.display = '';
 
@@ -2143,15 +2236,29 @@ function showMpModal(won, winnerName) {
     const cg = il.querySelector('.character-group');
     if (cg) cg.classList.add('win-' + theme);
 
-    if (iWon) launchConfetti();
+    launchConfetti();
+
+  } else if (theyWon) {
+    // ── SOMEONE ELSE WON ──
+    document.getElementById('m-emoji').style.display = '';
+    document.getElementById('m-emoji').innerHTML     = T.emojiRaw;
+    document.getElementById('m-title').textContent   = 'Too slow!';
+    document.getElementById('m-winner-name').textContent = winnerName + ' got there first';
+    document.getElementById('m-winner-banner').style.display = '';
+    document.getElementById('m-lose-body').style.display  = '';
+    document.getElementById('m-msg').textContent          = 'Better luck next round!';
+    document.getElementById('m-best-lose').textContent    = '\u2014';
+    document.getElementById('m-streak-lose').textContent  = '\u2014';
+
   } else {
+    // ── EVERYONE LOST ──
     document.getElementById('m-emoji').style.display = '';
     document.getElementById('m-emoji').innerHTML     = T.emojiRaw;
     document.getElementById('m-title').textContent   = 'Everyone lost!';
-    document.getElementById('m-lose-body').style.display = '';
-    document.getElementById('m-msg').textContent     = "Nobody could save them in time.";
-    document.getElementById('m-best-lose').textContent   = '\u2014';
-    document.getElementById('m-streak-lose').textContent = '\u2014';
+    document.getElementById('m-lose-body').style.display  = '';
+    document.getElementById('m-msg').textContent          = 'Nobody could save them in time.';
+    document.getElementById('m-best-lose').textContent    = '\u2014';
+    document.getElementById('m-streak-lose').textContent  = '\u2014';
   }
 
   document.getElementById('modal').style.display = 'flex';
