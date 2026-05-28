@@ -174,6 +174,7 @@ body.t-anime   { background: linear-gradient(160deg,#ffe0f0 0%,#ffc2e0 40%,#ffb3
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  flex: 0 0 100%; /* full-width row in game-wrap */
 }
 
 .back-btn {
@@ -739,6 +740,7 @@ body.t-anime   { background: linear-gradient(160deg,#ffe0f0 0%,#ffc2e0 40%,#ffb3
   gap: 6px;
   justify-content: center;
   padding: 4px 0;
+  flex: 0 0 100%; /* full-width row in game-wrap */
 }
 .player-chip {
   display: flex;
@@ -800,28 +802,25 @@ body.t-anime   { background: linear-gradient(160deg,#ffe0f0 0%,#ffc2e0 40%,#ffb3
   .theme-card p      { font-size: 0.78rem; }
 
   /* ── Game screen layout ── */
-  #game {
-    padding: 10px;
-    align-items: stretch;
-  }
-  .game-wrap {
-    flex-direction: column;
-    gap: 8px;
-    padding-top: 0;
-  }
-  /* Reorder: controls + keyboard first, illustration below */
-  .game-panel  { order: 1; gap: 8px; }
-  .illus-panel { order: 2; width: 100%; border-radius: 16px; max-height: 156px; }
+  #game { padding: 10px; align-items: stretch; }
+  .game-wrap { flex-direction: column; gap: 8px; padding-top: 0; }
 
-  /* Crop SVG to show character area (shift up ~18% of container width) */
-  #illus { margin-top: -18%; overflow: visible; }
+  /* Illustration: full width, taller, shows character area */
+  .illus-panel { width: 100%; border-radius: 16px; max-height: 220px; }
+  /* Shift SVG up so we see the character (not just sky).
+     margin-top % is relative to container width, so -25% of ~355px ≈ -89px,
+     which scrolls the SVG viewport to roughly y=90–310 where the character lives. */
+  #illus { margin-top: -25%; }
 
-  /* Hide guess-bar (wrong count shown via wrong letters) and hint text */
+  /* Hide guess-bar inside the clipped illustration area */
   .guess-bar { display: none; }
   .hint-text { display: none; }
 
+  /* Game panel */
+  .game-panel { gap: 8px; }
+
   /* Word display */
-  .word-wrap { padding: 12px 12px; }
+  .word-wrap { padding: 12px; }
   .word-row  { gap: 6px; }
   .slot      { min-width: clamp(20px, 6vw, 32px); }
   .slot .letter {
@@ -939,6 +938,15 @@ body.t-anime   { background: linear-gradient(160deg,#ffe0f0 0%,#ffc2e0 40%,#ffb3
 <!-- ══ GAME SCREEN ══ -->
 <div id="game" style="display:none">
   <div class="game-wrap">
+
+    <!-- Full-width header row (above both panels) -->
+    <div class="top-bar">
+      <button class="back-btn" id="back-btn" onclick="goBack()">&#8592; Leave</button>
+      <div class="theme-pill" id="tpill"></div>
+    </div>
+    <div id="player-bar" class="player-bar"></div>
+
+    <!-- Illustration -->
     <div class="illus-panel">
       <div id="illus"></div>
       <div class="danger-bar"><div class="danger-fill" id="danger" style="width:0%"></div></div>
@@ -951,12 +959,8 @@ body.t-anime   { background: linear-gradient(160deg,#ffe0f0 0%,#ffc2e0 40%,#ffb3
       </div>
     </div>
 
+    <!-- Word + keyboard -->
     <div class="game-panel">
-      <div class="top-bar">
-        <button class="back-btn" id="back-btn" onclick="goBack()">&#8592; Leave</button>
-        <div class="theme-pill" id="tpill"></div>
-      </div>
-      <div id="player-bar" class="player-bar"></div>
       <div class="hint-text" id="hint"></div>
 
       <div class="word-wrap">
@@ -1861,7 +1865,7 @@ function updateDanger() {
 }
 
 function guess(l) {
-  if (over || guessed.has(l)) return;
+  if (over || guessed.has(l) || mpGameEnded) return;
 
   // Optimistic local update for instant feedback
   guessed.add(l);
@@ -1873,29 +1877,41 @@ function guess(l) {
   const won  = word.split('').every(c => guessed.has(c));
   const lost = wrong >= 10;
 
-  const update = {
-    guessed: [...guessed],
-    wrong_count: wrong,
-    status: won ? 'won' : lost ? 'lost' : 'playing'
-  };
-  if (won) update.winner_name = mpPlayerName;
+  if (won || lost) {
+    mpGameEnded = true; // prevent any in-flight guesses from overwriting this
+    const status     = won ? 'won' : 'lost';
+    const winnerName = won ? mpPlayerName : null;
 
-  // Push to DB — other clients update via Realtime
-  sb.from('rooms').update(update).eq('id', mpRoomId);
+    // 1. Broadcast instantly — other clients react before DB round-trip
+    if (mpChannel) {
+      mpChannel.send({ type: 'broadcast', event: 'game_end',
+        payload: { status, winner_name: winnerName } });
+    }
 
-  if (won) {
+    // 2. Persist to DB
+    const update = { guessed: [...guessed], wrong_count: wrong, status };
+    if (won) update.winner_name = mpPlayerName;
+    sb.from('rooms').update(update).eq('id', mpRoomId);
+
+    // 3. Show own result
     over = true;
-    setTimeout(() => { launchConfetti(); triggerWinAnim(); showMpModal(true, mpPlayerName); }, 400);
-  } else if (lost) {
-    over = true;
-    const cg = document.querySelector('#illus .character-group');
-    if (cg) cg.classList.add('falling');
-    setTimeout(() => {
-      word.split('').forEach(c => guessed.add(c));
-      renderWord(); renderKeyboard();
-      showMpModal(false, null);
-    }, 1700);
-    renderWrong();
+    if (won) {
+      setTimeout(() => { launchConfetti(); triggerWinAnim(); showMpModal(true, mpPlayerName); }, 400);
+    } else {
+      const cg = document.querySelector('#illus .character-group');
+      if (cg) cg.classList.add('falling');
+      renderWrong();
+      setTimeout(() => {
+        word.split('').forEach(c => guessed.add(c));
+        renderWord(); renderKeyboard();
+        showMpModal(false, null);
+      }, 1700);
+    }
+  } else {
+    // Normal guess — only push to DB if game is still live
+    sb.from('rooms').update({
+      guessed: [...guessed], wrong_count: wrong, status: 'playing'
+    }).eq('id', mpRoomId);
   }
 }
 
@@ -1973,6 +1989,7 @@ let mpPlayerId   = null;
 let mpPending    = null;   // 'create' | 'join'
 let mpChannel    = null;
 let mpPlayers    = [];
+let mpGameEnded  = false;  // guard against overwriting a won/lost DB row
 
 /* ── Screen management ── */
 function showScreen(id) {
@@ -2144,6 +2161,10 @@ function subscribeRoom() {
         renderPlayers();
       }
     })
+    // Broadcast: instant win/lose delivery (no DB round-trip delay)
+    .on('broadcast', { event: 'game_end' }, ({ payload }) => {
+      if (!over) handleGameEnd(payload.status, payload.winner_name);
+    })
     .subscribe();
 }
 
@@ -2181,18 +2202,26 @@ function handleRoomUpdate(room) {
     }
   }
 
-  if (room.status === 'won' && !over) {
-    over    = true;
-    guessed = new Set(room.guessed || []);
-    renderWord(); renderKeyboard();
-    const iWon = room.winner_name === mpPlayerName;
-    if (iWon) triggerWinAnim();
-    // Brief pause so players see the completed/final word before the modal
-    setTimeout(() => showMpModal(true, room.winner_name), 700);
+  if ((room.status === 'won' || room.status === 'lost') && !over) {
+    // Postgres Changes backup — broadcast should have already fired,
+    // but this catches any case where broadcast was missed
+    handleGameEnd(room.status, room.winner_name || null);
   }
+}
 
-  if (room.status === 'lost' && !over) {
-    over = true;
+/* ══ SHARED GAME END HANDLER ══ */
+function handleGameEnd(status, winnerName) {
+  if (over) return; // already handled (e.g. via broadcast)
+  over         = true;
+  mpGameEnded  = true;
+
+  if (status === 'won') {
+    guessed = new Set(word.split('')); // reveal full word
+    renderWord(); renderKeyboard();
+    const iWon = winnerName === mpPlayerName;
+    if (iWon) triggerWinAnim();
+    setTimeout(() => showMpModal(true, winnerName), 600);
+  } else {
     const cg = document.querySelector('#illus .character-group');
     if (cg) cg.classList.add('falling');
     setTimeout(() => {
@@ -2268,7 +2297,7 @@ function showMpModal(won, winnerName) {
 async function mpPlayAgain() {
   document.getElementById('modal').style.display = 'none';
   document.body.className = '';
-  theme = null; word = ''; guessed = new Set(); wrong = 0; over = false;
+  theme = null; word = ''; guessed = new Set(); wrong = 0; over = false; mpGameEnded = false;
 
   if (mpIsHost) {
     await sb.from('rooms').update({
@@ -2290,7 +2319,7 @@ function goBack() {
   if (mpChannel) { sb.removeChannel(mpChannel); mpChannel = null; }
   mpRoomId = null; mpPlayerName = null; mpIsHost = false;
   mpPlayerId = null; mpPlayers = [];
-  theme = null; word = ''; guessed = new Set(); wrong = 0; over = false;
+  theme = null; word = ''; guessed = new Set(); wrong = 0; over = false; mpGameEnded = false;
   document.getElementById('modal').style.display = 'none';
   document.getElementById('confetti-container').innerHTML = '';
   document.body.className = '';
